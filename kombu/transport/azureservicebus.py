@@ -15,6 +15,15 @@ exits. Setting the ``uamqp_keep_alive_interval`` transport option to 0 will
 prevent the keep_alive thread from starting
 
 
+A non-zero ``prefetch_count`` reduces per-message latency on high-throughput
+queues, but Azure starts the ``peek_lock_seconds`` countdown the moment a
+message is dispatched to the receiver -- including time spent buffered
+locally. As a rule of thumb, keep ``prefetch_count * average_task_duration``
+well below ``peek_lock_seconds``; otherwise messages at the back of the
+buffer will raise ``MessageLockLostError`` on ack and be redelivered,
+landing in the dead-letter queue once ``MaxDeliveryCount`` is exhausted.
+
+
 More information about Azure Service Bus:
 https://azure.microsoft.com/en-us/services/service-bus/
 
@@ -53,6 +62,9 @@ Transport Options
 * ``retry_backoff_factor`` - Azure SDK exponential backoff factor.
   Default ``0.8``
 * ``retry_backoff_max`` - Azure SDK retry total time. Default ``120``
+* ``prefetch_count`` - Number of messages the Azure Service Bus SDK
+  receiver eagerly buffers locally per queue. Default ``0``
+  (no SDK-side prefetch).
 """
 
 from __future__ import annotations
@@ -120,6 +132,8 @@ class Channel(virtual.Channel):
     default_retry_backoff_factor: float = 0.8
     # Max time to backoff (is the default from service bus repo)
     default_retry_backoff_max: int = 120
+    # SDK-side prefetch buffer size (0 = disabled, Azure SDK default)
+    default_prefetch_count: int = 0
     domain_format: str = 'kombu%(vhost)s'
     _queue_cache: dict[str, SendReceive] = {}
     _noack_queues: set[str] = set()
@@ -204,7 +218,8 @@ class Channel(virtual.Channel):
         if queue_obj is None or queue_obj.receiver is None:
             receiver = self.queue_service.get_queue_receiver(
                 queue_name=queue, receive_mode=recv_mode,
-                keep_alive=self.uamqp_keep_alive_interval)
+                keep_alive=self.uamqp_keep_alive_interval,
+                prefetch_count=self.prefetch_count)
             queue_obj = self._add_queue_to_cache(cache_key, receiver=receiver)
         return queue_obj
 
@@ -426,6 +441,11 @@ class Channel(virtual.Channel):
     def retry_backoff_max(self) -> int:
         return self.transport_options.get(
             'retry_backoff_max', self.default_retry_backoff_max)
+
+    @cached_property
+    def prefetch_count(self) -> int:
+        return self.transport_options.get(
+            'prefetch_count', self.default_prefetch_count)
 
 
 class Transport(virtual.Transport):

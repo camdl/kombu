@@ -215,6 +215,23 @@ def test_invalid_peek_lock_seconds():
     assert channel.peek_lock_seconds == 300
 
 
+def test_default_prefetch_count():
+    conn = Connection(URL_CREDS_SAS, transport=azureservicebus.Transport)
+    channel = conn.channel()
+
+    assert channel.prefetch_count == \
+        azureservicebus.Channel.default_prefetch_count
+    assert channel.prefetch_count == 0
+
+
+def test_custom_prefetch_count():
+    conn = Connection(URL_CREDS_SAS, transport=azureservicebus.Transport,
+                      transport_options={'prefetch_count': 50})
+    channel = conn.channel()
+
+    assert channel.prefetch_count == 50
+
+
 @pytest.fixture
 def random_queue():
     return f'azureservicebus_queue_{random.randint(1000, 9999)}'
@@ -308,6 +325,35 @@ def test_basic_put_get(mock_queue: MockQueue):
 def test_empty_queue_get(mock_queue: MockQueue):
     with pytest.raises(Empty):
         mock_queue.channel._get(mock_queue.queue_name)
+
+
+def test_default_prefetch_count_passed_to_receiver(mock_queue: MockQueue):
+    mock_queue.producer.publish('test message')
+    mock_queue.channel._get(mock_queue.queue_name)
+
+    recv_calls = mock_queue.asb.queues[mock_queue.queue_name].recv_calls
+    assert recv_calls[0]['receiver_options']['prefetch_count'] == 0
+
+
+def test_custom_prefetch_count_passed_to_receiver(
+    mock_asb, mock_asb_management, random_queue
+):
+    exchange = Exchange('test_servicebus', type='direct')
+    queue = Queue(random_queue, exchange, random_queue)
+    conn = Connection(
+        URL_CREDS_SAS,
+        transport=azureservicebus.Transport,
+        transport_options={'prefetch_count': 25},
+    )
+    channel = conn.channel()
+    queue(channel).declare()
+    producer = messaging.Producer(channel, exchange, routing_key=random_queue)
+
+    producer.publish('test message')
+    channel._get(random_queue)
+
+    recv_calls = mock_asb.queues[random_queue].recv_calls
+    assert recv_calls[0]['receiver_options']['prefetch_count'] == 25
 
 
 def test_delete_empty_queue(mock_queue: MockQueue):
