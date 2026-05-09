@@ -137,14 +137,17 @@ class Channel(virtual.Channel):
     domain_format: str = 'kombu%(vhost)s'
     _queue_cache: dict[str, SendReceive] = {}
     _noack_queues: set[str] = set()
+    # Declared on virtual.Channel.__init__ as `self.closed = False`; restate
+    # the type here so mypy can see it without following the parent module.
+    closed: bool = False
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
 
-        self._namespace = None
-        self._policy = None
-        self._sas_key = None
-        self._connection_string = None
+        self._namespace: str = ''
+        self._policy: str | None = None
+        self._sas_key: str | None = None
+        self._connection_string: str | None = None
 
         self._try_parse_connection_string()
 
@@ -163,25 +166,27 @@ class Channel(virtual.Channel):
         ):
             return None
 
-        if ":" in self._credential:
+        if isinstance(self._credential, str) and ":" in self._credential:
             self._policy, self._sas_key = self._credential.split(':', 1)
 
-        conn_dict = {
-            'Endpoint': 'sb://' + self._namespace,
-            'SharedAccessKeyName': self._policy,
-            'SharedAccessKey': self._sas_key,
-        }
-        self._connection_string = ';'.join(
-            [key + '=' + value for key, value in conn_dict.items()])
+            conn_dict = {
+                'Endpoint': 'sb://' + self._namespace,
+                'SharedAccessKeyName': self._policy,
+                'SharedAccessKey': self._sas_key,
+            }
+            self._connection_string = ';'.join(
+                [key + '=' + value for key, value in conn_dict.items()])
 
-    def basic_consume(self, queue, no_ack, *args, **kwargs):
+    def basic_consume(
+            self, queue: str, no_ack: bool,
+            *args: Any, **kwargs: Any) -> Any:
         if no_ack:
             self._noack_queues.add(queue)
         return super().basic_consume(
             queue, no_ack, *args, **kwargs
         )
 
-    def basic_cancel(self, consumer_tag):
+    def basic_cancel(self, consumer_tag: str) -> Any:
         if consumer_tag in self._consumers:
             queue = self._tag_to_queue[consumer_tag]
             self._noack_queues.discard(queue)
@@ -235,7 +240,7 @@ class Channel(virtual.Channel):
         # super()._restore(message)
         pass
 
-    def _new_queue(self, queue: str, **kwargs) -> SendReceive:
+    def _new_queue(self, queue: str, **kwargs: Any) -> SendReceive:
         """Ensure a queue exists in ServiceBus."""
         queue = self.entity_name(self.queue_name_prefix + queue)
 
@@ -253,7 +258,7 @@ class Channel(virtual.Channel):
                 pass
             return self._add_queue_to_cache(queue)
 
-    def _delete(self, queue: str, *args, **kwargs) -> None:
+    def _delete(self, queue: str, *args: Any, **kwargs: Any) -> None:
         """Delete queue by name."""
         queue = self.entity_name(self.queue_name_prefix + queue)
 
@@ -262,7 +267,7 @@ class Channel(virtual.Channel):
         if send_receive_obj:
             send_receive_obj.close()
 
-    def _put(self, queue: str, message, **kwargs) -> None:
+    def _put(self, queue: str, message: Any, **kwargs: Any) -> None:
         """Put message onto queue."""
         queue = self.entity_name(self.queue_name_prefix + queue)
         msg = ServiceBusMessage(dumps(message))
@@ -329,7 +334,7 @@ class Channel(virtual.Channel):
 
         return props.total_message_count
 
-    def _purge(self, queue) -> int:
+    def _purge(self, queue: str) -> int:
         """Delete all current messages in a queue."""
         # Azure doesn't provide a purge api yet
         n = 0
@@ -398,11 +403,11 @@ class Channel(virtual.Channel):
         )
 
     @property
-    def conninfo(self):
+    def conninfo(self) -> Any:
         return self.connection.client
 
     @property
-    def transport_options(self):
+    def transport_options(self) -> dict[str, Any]:
         return self.connection.client.transport_options
 
     @cached_property
@@ -501,7 +506,9 @@ class Transport(virtual.Transport):
         return namespace, credential
 
     @classmethod
-    def as_uri(cls, uri: str, include_password=False, mask='**') -> str:
+    def as_uri(
+            cls, uri: str, include_password: bool = False,
+            mask: str = '**') -> str:
         namespace, credential = cls.parse_uri(uri)
         if isinstance(credential, str) and ":" in credential:
             policy, sas_key = credential.split(':', 1)
